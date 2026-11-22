@@ -1,6 +1,6 @@
 ﻿param(
     [Parameter(Mandatory = $true)] [string] $ToolsDirectory,
-    [string] $OutputPath = (Join-Path $PSScriptRoot 'B站视频下载器-Windows-x64-v1.0.1.zip')
+    [string] $OutputPath = (Join-Path $PSScriptRoot 'B站视频下载器-Windows-x64-v1.1.0.zip')
 )
 
 $ErrorActionPreference = 'Stop'

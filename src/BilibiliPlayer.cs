@@ -48,10 +48,44 @@ namespace BiliVideoDownloader
                     throw new InvalidOperationException("播放器没有返回分 P 编号。");
 
                 string playPath = "/x/player/playurl?" + identifier + "&cid=" + cid.ToString(CultureInfo.InvariantCulture) +
-                    "&qn=64&fnver=0&fnval=4048";
-                var playback = await GetDataAsync(client, playPath, token).ConfigureAwait(false) as JsonMap;
+                    "&fnver=0&fnval=4048";
+                var playback = await GetFullPlaybackAsync(client, playPath, part, token).ConfigureAwait(false);
                 return ParsePlayback(url, player, id, partNumber, part, playback);
             }
+        }
+
+        private static async Task<JsonMap> GetFullPlaybackAsync(HttpClient client, string path, JsonMap part,
+            CancellationToken token)
+        {
+            try
+            {
+                string highQuality = path + "&try_look=1&qn=" + DownloadEngine.FullHdQuality;
+                var response = await GetDataAsync(client, highQuality, token).ConfigureAwait(false) as JsonMap;
+                var dash = Entry(response, "dash") as JsonMap;
+                if (Maps(Entry(dash, "video")).Any() && !IsPreview(response, part))
+                    return response;
+            }
+            catch (HttpRequestException) { }
+            catch (InvalidOperationException) { }
+            catch (OperationCanceledException) { token.ThrowIfCancellationRequested(); }
+
+            var regular = await GetDataAsync(client, path + "&qn=64", token).ConfigureAwait(false) as JsonMap;
+            if (regular == null || IsPreview(regular, part))
+                throw new InvalidOperationException("B 站播放器没有返回完整的视频流。");
+            return regular;
+        }
+
+        internal static bool IsPreview(JsonMap response, JsonMap part)
+        {
+            string flag = DownloadEngine.Value(response, "is_preview");
+            var dash = Entry(response, "dash") as JsonMap;
+            double duration = DownloadEngine.Number(part, "duration");
+            double mediaDuration = DownloadEngine.Number(response, "timelength") / 1000;
+            double dashDuration = dash == null ? 0 : DownloadEngine.Number(dash, "duration");
+
+            return flag == "1" || String.Equals(flag, "True", StringComparison.OrdinalIgnoreCase) ||
+                (mediaDuration > 0 && mediaDuration < duration - 2) ||
+                (dashDuration > 0 && dashDuration < duration - 2);
         }
 
         private static async Task<object> GetDataAsync(HttpClient client, string path, CancellationToken token)
@@ -89,7 +123,8 @@ namespace BiliVideoDownloader
 
             string json = DownloadEngine.Json().Serialize(metadata);
             VideoInfo video = DownloadEngine.ParseVideo(url.AbsoluteUri, json);
-            video.PlayerMetadata = json;
+            foreach (VideoQuality quality in video.Qualities)
+                quality.PlayerMetadata = json;
             return video;
         }
 

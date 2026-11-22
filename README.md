@@ -1,6 +1,6 @@
 # B站视频下载器
 
-基于 Windows Forms 的便携下载器。`MainWindow.cs` 管理界面和下载状态，`DownloadEngine.cs` 调用 yt-dlp 和 FFmpeg。若 yt-dlp 的网页入口返回 HTTP 412，`BilibiliPlayer.cs` 会尝试从 B 站的公开嵌入播放器读取当前分 P 的画面和音频。
+基于 Windows Forms 的便携下载器。`MainWindow.cs` 管理界面和下载状态，`DownloadEngine.cs` 调用 yt-dlp 和 FFmpeg。若网页入口返回 HTTP 412 或缺少普通 1080P 档，`BilibiliPlayer.cs` 会从 B 站嵌入播放器查询当前分 P 的可用画质。只有 B 站为游客返回完整视频流时，该档画质才会显示。
 
 ## 重新打包
 
@@ -10,4 +10,4 @@
 .\Build.ps1 -ToolsDirectory 'C:\path\to\tools'
 ```
 
-`Build.ps1` 默认在源码目录生成 `B站视频下载器-Windows-x64-v1.0.1.zip`。如需自定义位置，可使用 `-OutputPath`。
+`Build.ps1` 默认在源码目录生成 `B站视频下载器-Windows-x64-v1.1.0.zip`。如需自定义位置，可使用 `-OutputPath`。

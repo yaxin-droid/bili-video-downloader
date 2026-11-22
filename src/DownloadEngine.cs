@@ -21,7 +21,6 @@ namespace BiliVideoDownloader
         public string Uploader;
         public string Duration;
         public List<VideoQuality> Qualities;
-        public string PlayerMetadata;
     }
 
     internal sealed class VideoQuality
@@ -29,6 +28,8 @@ namespace BiliVideoDownloader
         public string VideoFormat;
         public string AudioFormat;
         public string Label;
+        public int QualityId;
+        public string PlayerMetadata;
 
         public override string ToString()
         {
@@ -61,6 +62,7 @@ namespace BiliVideoDownloader
 
     internal sealed class DownloadEngine
     {
+        internal const int FullHdQuality = 80;
         private const string ProgressPrefix = "BILI_PROGRESS:";
         private const string MergePrefix = "BILI_MERGE:";
         private const string FilePrefix = "BILI_FILE:";
@@ -93,15 +95,19 @@ namespace BiliVideoDownloader
         {
             Uri input = ReadAddress(address);
             string url = await ResolveAsync(input, token).ConfigureAwait(false);
-            DownloadException firstError;
+            VideoInfo video = null;
+            DownloadException firstError = null;
             try
             {
-                return await Task.Run(() =>
+                video = await Task.Run(() =>
                 {
                     var output = new StringBuilder();
                     Run(new[] { "--dump-single-json", url }, line => output.AppendLine(line), token);
                     return ParseVideo(url, output.ToString());
                 }, token).ConfigureAwait(false);
+
+                if (video.Qualities.Any(quality => quality.QualityId == FullHdQuality))
+                    return video;
             }
             catch (DownloadException error)
             {
@@ -111,14 +117,24 @@ namespace BiliVideoDownloader
             }
 
             if (status != null)
-                status.Report("正在通过 B 站播放器读取视频…");
+                status.Report(video == null ? "正在通过 B 站播放器读取视频…" : "正在查找可下载的 1080P 画质…");
             try
             {
-                return await BilibiliPlayer.InspectAsync(new Uri(url), token).ConfigureAwait(false);
+                VideoInfo playerVideo = await BilibiliPlayer.InspectAsync(new Uri(url), token).ConfigureAwait(false);
+                if (video == null)
+                    return playerVideo;
+
+                int position = video.Qualities.FindIndex(quality => quality.QualityId < FullHdQuality);
+                video.Qualities.InsertRange(position < 0 ? video.Qualities.Count : position,
+                    playerVideo.Qualities.Where(quality => quality.QualityId == FullHdQuality));
+                return video;
             }
             catch (Exception playerError)
             {
                 token.ThrowIfCancellationRequested();
+                if (video != null)
+                    return video;
+
                 throw new DownloadException("普通网页和播放器入口均无法读取此视频。请查看错误详情。",
                     firstError.Details + Environment.NewLine + Environment.NewLine + "播放器入口：" + playerError.Message);
             }
@@ -146,7 +162,7 @@ namespace BiliVideoDownloader
                     "--progress-template", "postprocess:" + MergePrefix + "%(progress.status)s",
                     "--print", "after_move:" + FilePrefix + "%(filepath)j"
                 };
-                string metadataPath = video.PlayerMetadata == null ? null :
+                string metadataPath = quality.PlayerMetadata == null ? null :
                     Path.Combine(Path.GetTempPath(), "BiliPlayer-" + Guid.NewGuid().ToString("N") + ".json");
                 try
                 {
@@ -154,7 +170,7 @@ namespace BiliVideoDownloader
                         arguments.Add(video.Url);
                     else
                     {
-                        File.WriteAllText(metadataPath, video.PlayerMetadata, new UTF8Encoding(false));
+                        File.WriteAllText(metadataPath, quality.PlayerMetadata, new UTF8Encoding(false));
                         // Some Bilibili CDN streams require an explicit end offset even for the first request.
                         arguments.AddRange(new[] { "--http-chunk-size", "8M", "--load-info-json", metadataPath });
                     }
@@ -178,7 +194,7 @@ namespace BiliVideoDownloader
                             !error.Details.Contains("HTTP Error 567")))
                             throw;
 
-                        string backup = BilibiliPlayer.BackupMetadata(video.PlayerMetadata, quality);
+                        string backup = BilibiliPlayer.BackupMetadata(quality.PlayerMetadata, quality);
                         if (backup == null)
                             throw;
 
@@ -282,6 +298,7 @@ namespace BiliVideoDownloader
                 .Select(f => new VideoQuality {
                     VideoFormat = f.Id,
                     AudioFormat = f.HasAudio ? null : audio.Id,
+                    QualityId = f.QualityId,
                     Label = f.ResolutionLabel +
                         (f.FrameRate >= 50 && f.QualityId != 74 && f.QualityId != 116
                             ? " · " + Math.Round(f.FrameRate) + " 帧" : "") +
