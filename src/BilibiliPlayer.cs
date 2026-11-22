@@ -119,6 +119,7 @@ namespace BiliVideoDownloader
 
                 yield return new JsonMap {
                     { "format_id", formatId }, { "url", sources[0] }, { "ext", isVideo ? "mp4" : "m4a" },
+                    { "quality", isVideo ? quality : 0 },
                     { "bili_backup_urls", sources.Skip(1).ToArray() },
                     { "vcodec", isVideo ? codec : "none" }, { "acodec", isVideo ? "none" : codec },
                     { "width", DownloadEngine.Number(stream, "width") },

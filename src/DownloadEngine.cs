@@ -67,6 +67,11 @@ namespace BiliVideoDownloader
         private static readonly Regex VideoPath = new Regex(
             @"^/(?:s/)?video/(BV[a-z0-9]{10}|av[0-9]+)/?$", RegexOptions.IgnoreCase);
         private static readonly Regex FormatId = new Regex(@"^[a-zA-Z0-9._-]+$");
+        private static readonly Dictionary<int, string> QualityTiers = new Dictionary<int, string> {
+            { 6, "240P" }, { 16, "360P" }, { 32, "480P" }, { 64, "720P" }, { 74, "720P60" },
+            { 80, "1080P" }, { 112, "1080P 高码率" }, { 116, "1080P60" }, { 120, "4K" },
+            { 125, "HDR" }, { 126, "杜比视界" }, { 127, "8K" }
+        };
 
         private readonly string toolsDirectory;
         private readonly string extractor;
@@ -270,15 +275,16 @@ namespace BiliVideoDownloader
 
             var qualities = formats.Where(f => f.HasVideo && f.Extension == "mp4" &&
                     f.ShortEdge > 0 && (f.HasAudio || audio != null))
-                .GroupBy(f => new { f.ShortEdge, HighFrameRate = f.FrameRate >= 50 })
+                .GroupBy(f => new { f.QualityId, f.ShortEdge, HighFrameRate = f.FrameRate >= 50 })
                 .Select(group => group.OrderByDescending(f => f.H264)
                     .ThenByDescending(f => f.Bitrate).First())
                 .OrderByDescending(f => f.ShortEdge).ThenByDescending(f => f.FrameRate)
                 .Select(f => new VideoQuality {
                     VideoFormat = f.Id,
                     AudioFormat = f.HasAudio ? null : audio.Id,
-                    Label = f.ShortEdge.ToString(CultureInfo.InvariantCulture) + "P" +
-                        (f.FrameRate >= 50 ? " · " + Math.Round(f.FrameRate) + " 帧" : "") +
+                    Label = f.ResolutionLabel +
+                        (f.FrameRate >= 50 && f.QualityId != 74 && f.QualityId != 116
+                            ? " · " + Math.Round(f.FrameRate) + " 帧" : "") +
                         (f.H264 || f.CodecLabel == "" ? "" : " · " + f.CodecLabel)
                 }).ToList();
 
@@ -293,9 +299,9 @@ namespace BiliVideoDownloader
 
         private sealed class MediaFormat
         {
-            public readonly string Id, Extension, CodecLabel;
+            public readonly string Id, Extension, CodecLabel, ResolutionLabel;
             public readonly bool HasAudio, HasVideo, H264;
-            public readonly int ShortEdge;
+            public readonly int ShortEdge, QualityId;
             public readonly double FrameRate, Bitrate;
 
             public MediaFormat(Dictionary<string, object> entry)
@@ -310,9 +316,16 @@ namespace BiliVideoDownloader
                 CodecLabel = video.StartsWith("av01", StringComparison.Ordinal) ? "AV1" :
                     (video.StartsWith("hev", StringComparison.Ordinal) || video.StartsWith("hvc", StringComparison.Ordinal)
                         ? "HEVC" : "");
-                double height = Number(entry, "height");
-                double width = Number(entry, "width");
-                ShortEdge = (int)(width > 0 && height > 0 ? Math.Min(width, height) : Math.Max(width, height));
+                int height = (int)Number(entry, "height");
+                int width = (int)Number(entry, "width");
+                ShortEdge = width > 0 && height > 0 ? Math.Min(width, height) : Math.Max(width, height);
+                QualityId = (int)Number(entry, "quality");
+                string tier;
+                string dimensions = width > 0 && height > 0 ? width + "×" + height : "";
+                if (QualityTiers.TryGetValue(QualityId, out tier))
+                    ResolutionLabel = dimensions.Length > 0 ? tier + "（" + dimensions + "）" : tier;
+                else
+                    ResolutionLabel = dimensions.Length > 0 ? dimensions : ShortEdge + " 像素";
                 FrameRate = Number(entry, "fps");
                 Bitrate = Number(entry, HasVideo ? "tbr" : "abr");
                 if (Bitrate == 0)
